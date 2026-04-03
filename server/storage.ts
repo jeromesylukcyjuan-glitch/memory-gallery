@@ -100,3 +100,53 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
     url: await buildDownloadUrl(baseUrl, key, apiKey),
   };
 }
+
+
+import { nanoid } from "nanoid";
+
+/**
+ * 上传回忆文件到S3
+ * @param file 文件数据（Buffer或Uint8Array）
+ * @param fileName 原始文件名
+ * @param mimeType 文件MIME类型
+ * @returns 返回上传后的URL和fileKey
+ */
+export async function uploadMemoryFile(
+  file: Buffer | Uint8Array,
+  fileName: string,
+  mimeType: string
+) {
+  try {
+    // 生成唯一的文件key，避免枚举
+    const randomSuffix = nanoid(8);
+    const fileExtension = fileName.split(".").pop() || "bin";
+    const fileKey = `memories/${Date.now()}-${randomSuffix}.${fileExtension}`;
+
+    // 上传到S3
+    const { url } = await storagePut(fileKey, file, mimeType);
+
+    return {
+      url,
+      fileKey,
+      success: true,
+    };
+  } catch (error) {
+    console.error("Failed to upload memory file:", error);
+    throw new Error("文件上传失败");
+  }
+}
+
+/**
+ * 获取文件的预签名URL
+ * @param fileKey S3文件key
+ * @returns 预签名URL
+ */
+export async function getMemoryFileUrl(fileKey: string) {
+  try {
+    const { url } = await storageGet(fileKey);
+    return url;
+  } catch (error) {
+    console.error("Failed to get memory file URL:", error);
+    throw new Error("获取文件URL失败");
+  }
+}

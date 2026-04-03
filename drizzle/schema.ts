@@ -25,4 +25,44 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const albums = mysqlTable("albums", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  coverImageUrl: text("coverImageUrl"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Album = typeof albums.$inferSelect;
+export type InsertAlbum = typeof albums.$inferInsert;
+
+export const memories = mysqlTable("memories", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  albumId: int("albumId"),
+  title: varchar("title", { length: 255 }),
+  description: text("description"),
+  fileUrl: text("fileUrl").notNull(),
+  fileKey: text("fileKey").notNull(),
+  fileType: varchar("fileType", { length: 50 }).notNull(), // 'image' or 'video'
+  mimeType: varchar("mimeType", { length: 100 }),
+  memoryDate: timestamp("memoryDate").notNull(), // 回忆发生的日期
+  aiGenerated: mysqlEnum("aiGenerated", ["pending", "completed", "failed"]).default("pending"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Memory = typeof memories.$inferSelect;
+export type InsertMemory = typeof memories.$inferInsert;
+
+export const tags = mysqlTable("tags", {
+  id: int("id").autoincrement().primaryKey(),
+  memoryId: int("memoryId").notNull(),
+  tag: varchar("tag", { length: 100 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Tag = typeof tags.$inferSelect;
+export type InsertTag = typeof tags.$inferInsert;
