@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Memory } from "../../../drizzle/schema";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Play, ChevronLeft, ChevronRight, Home } from "lucide-react";
@@ -42,6 +42,27 @@ export default function MemoryGrid({ memories }: MemoryGridProps) {
     setSelectedMemory(null);
     setSelectedIndex(-1);
   };
+
+  // 键盘快捷键支持
+  useEffect(() => {
+    if (!selectedMemory) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevious();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNext();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedMemory, selectedIndex, allMemoriesList]);
 
   // 按日期分组回忆
   const groupedMemories = memories.reduce(
