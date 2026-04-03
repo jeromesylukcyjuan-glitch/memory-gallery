@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { Upload, X } from "lucide-react";
+import { Upload, X, AlertCircle, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface UploadModalProps {
@@ -12,8 +12,15 @@ interface UploadModalProps {
   onUploadSuccess: () => void;
 }
 
+interface FileUploadItem {
+  file: File;
+  progress: number;
+  status: "pending" | "uploading" | "success" | "error";
+  error?: string;
+}
+
 export default function UploadModal({ isOpen, onClose, onUploadSuccess }: UploadModalProps) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<FileUploadItem[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [memoryDate, setMemoryDate] = useState(new Date().toISOString().split("T")[0]);
@@ -51,20 +58,53 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
       file.type.startsWith("image/") || file.type.startsWith("video/")
     );
 
-    setFiles((prev) => [...prev, ...droppedFiles]);
+    if (droppedFiles.length > 0) {
+      const newFiles: FileUploadItem[] = droppedFiles.map((file) => ({
+        file,
+        progress: 0,
+        status: "pending",
+      }));
+      setFiles((prev) => [...prev, ...newFiles]);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files).filter((file) =>
-        file.type.startsWith("image/") || file.type.startsWith("video/")
-      );
-      setFiles((prev) => [...prev, ...selectedFiles]);
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length > 0) {
+      const newFiles: FileUploadItem[] = selectedFiles.map((file) => ({
+        file,
+        progress: 0,
+        status: "pending",
+      }));
+      setFiles((prev) => [...prev, ...newFiles]);
     }
   };
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadFile = async (fileItem: FileUploadItem): Promise<{ url: string; fileKey: string } | null> => {
+    const formData = new FormData();
+    formData.append("file", fileItem.file);
+    formData.append("filename", fileItem.file.name);
+
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "上传失败");
+      }
+
+      const data = await response.json();
+      return { url: data.url, fileKey: data.fileKey };
+    } catch (error) {
+      throw error;
+    }
   };
 
   const handleUpload = async () => {
@@ -74,51 +114,84 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
     }
 
     setIsUploading(true);
+    let successCount = 0;
+    let errorCount = 0;
 
     try {
-      for (const file of files) {
-        // 上传文件到S3
-        const formData = new FormData();
-        formData.append("file", file);
+      for (let i = 0; i < files.length; i++) {
+        const fileItem = files[i];
+        setFiles((prev) =>
+          prev.map((f, idx) =>
+            idx === i ? { ...f, status: "uploading" } : f
+          )
+        );
 
-        // 这里需要实现文件上传到S3的逻辑
-        // 暂时使用模拟的URL
-        const fileUrl = URL.createObjectURL(file);
-        const fileKey = `memories/${Date.now()}-${file.name}`;
+        try {
+          // 上传文件到S3
+          const uploadResult = await uploadFile(fileItem);
+          if (!uploadResult) {
+            throw new Error("上传返回无效结果");
+          }
 
-        const fileType = file.type.startsWith("image/") ? "image" : "video";
+          const fileType = fileItem.file.type.startsWith("image/") ? "image" : "video";
 
-        // 创建回忆记录
-        const result = await createMemoryMutation.mutateAsync({
-          fileUrl,
-          fileKey,
-          fileType,
-          mimeType: file.type,
-          title: title || file.name,
-          description,
-          memoryDate: new Date(memoryDate),
-        });
-
-        // 触发AI标注（异步执行）
-        if (result && typeof result === "object" && "id" in result) {
-          generateAIMutation.mutate({
-            memoryId: (result as any).id,
-            fileUrl,
+          // 创建回忆记录
+          const result = await createMemoryMutation.mutateAsync({
+            fileUrl: uploadResult.url,
+            fileKey: uploadResult.fileKey,
             fileType,
+            mimeType: fileItem.file.type,
+            title: title || fileItem.file.name,
+            description,
+            memoryDate: new Date(memoryDate),
           });
+
+          // 触发AI标注（异步执行）
+          if (result && typeof result === "object" && "id" in result) {
+            generateAIMutation.mutate({
+              memoryId: (result as any).id,
+              fileUrl: uploadResult.url,
+              fileType,
+            });
+          }
+
+          setFiles((prev) =>
+            prev.map((f, idx) =>
+              idx === i ? { ...f, status: "success", progress: 100 } : f
+            )
+          );
+          successCount++;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "上传失败";
+          setFiles((prev) =>
+            prev.map((f, idx) =>
+              idx === i ? { ...f, status: "error", error: errorMessage } : f
+            )
+          );
+          errorCount++;
         }
       }
 
-      toast.success("回忆上传成功！");
-      setFiles([]);
-      setTitle("");
-      setDescription("");
-      setMemoryDate(new Date().toISOString().split("T")[0]);
-      onUploadSuccess();
-      onClose();
+      if (successCount > 0) {
+        toast.success(`成功上传 ${successCount} 个文件`);
+      }
+      if (errorCount > 0) {
+        toast.error(`${errorCount} 个文件上传失败`);
+      }
+
+      if (successCount > 0) {
+        setTimeout(() => {
+          setFiles([]);
+          setTitle("");
+          setDescription("");
+          setMemoryDate(new Date().toISOString().split("T")[0]);
+          onUploadSuccess();
+          onClose();
+        }, 1500);
+      }
     } catch (error) {
       console.error("Upload error:", error);
-      toast.error("上传失败，请重试");
+      toast.error("上传过程出错");
     } finally {
       setIsUploading(false);
     }
@@ -128,21 +201,23 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl bg-white/95 backdrop-blur border-2 border-amber-200">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-amber-900" style={{ fontFamily: "var(--font-script)" }}>
+          <DialogTitle className="text-2xl" style={{ fontFamily: "var(--font-script)" }}>
             上传新回忆
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* 拖拽上传区域 */}
           <div
             ref={dragRef}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className="sketch-dashed border-2 border-dashed border-amber-300 rounded-lg p-8 text-center cursor-pointer transition-colors"
+            className="border-2 border-dashed border-amber-300 rounded-lg p-8 text-center cursor-pointer transition-colors"
           >
+            <Upload className="w-12 h-12 mx-auto mb-2 text-amber-700" />
+            <p className="text-amber-900 font-medium">拖拽文件到这里或点击选择</p>
+            <p className="text-sm text-amber-700">支持图片和视频，单个文件最大500MB</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -151,89 +226,116 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
               onChange={handleFileSelect}
               className="hidden"
             />
-            <Upload className="w-12 h-12 text-amber-700 mx-auto mb-4" />
-            <h3 className="font-bold text-lg text-amber-900 mb-2">
-              拖拽文件到这里或点击选择
-            </h3>
-            <p className="text-amber-800 text-sm">
-              支持图片和视频，单个文件最大 100MB
-            </p>
+            <Button
+              variant="outline"
+              className="mt-4 border-amber-700 text-amber-900 hover:bg-amber-50"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              选择文件
+            </Button>
           </div>
 
           {/* 已选择的文件列表 */}
           {files.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="font-bold text-amber-900">已选择的文件 ({files.length})</h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {files.map((file, index) => (
-                  <div
-                    key={index}
-                    className="sketch-border p-3 bg-white/70 flex items-center justify-between"
-                  >
-                    <span className="text-amber-900 text-sm truncate">
-                      {file.name}
-                    </span>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {files.map((fileItem, index) => (
+                <div
+                  key={index}
+                  className="flex items-center gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-900 truncate">
+                      {fileItem.file.name}
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      {(fileItem.file.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                    {fileItem.status === "uploading" && (
+                      <div className="mt-1 w-full bg-amber-200 rounded-full h-1.5">
+                        <div
+                          className="bg-amber-700 h-1.5 rounded-full transition-all"
+                          style={{ width: `${fileItem.progress}%` }}
+                        />
+                      </div>
+                    )}
+                    {fileItem.error && (
+                      <p className="text-xs text-red-600 mt-1">{fileItem.error}</p>
+                    )}
+                  </div>
+
+                  {fileItem.status === "success" && (
+                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                  )}
+                  {fileItem.status === "error" && (
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                  )}
+                  {fileItem.status !== "success" && fileItem.status !== "error" && (
                     <button
                       onClick={() => removeFile(index)}
-                      className="text-amber-600 hover:text-amber-900"
+                      disabled={isUploading}
+                      className="text-amber-700 hover:text-amber-900 disabled:opacity-50"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-5 h-5" />
                     </button>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
-          {/* 回忆信息表单 */}
-          <div className="space-y-4">
+          {/* 元数据输入 */}
+          <div className="space-y-3 border-t border-amber-200 pt-4">
             <div>
-              <label className="block font-bold text-amber-900 mb-2">标题（可选）</label>
+              <label className="text-sm font-medium text-amber-900">标题（可选）</label>
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="给这个回忆起个名字..."
-                className="border-amber-200 focus:border-amber-400"
+                className="mt-1 border-amber-200 focus:border-amber-500"
+                disabled={isUploading}
               />
             </div>
 
             <div>
-              <label className="block font-bold text-amber-900 mb-2">描述（可选）</label>
+              <label className="text-sm font-medium text-amber-900">描述（可选）</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="记录一些关于这个回忆的细节..."
-                className="w-full p-2 border-2 border-amber-200 rounded-lg focus:border-amber-400 focus:outline-none resize-none"
+                className="mt-1 w-full p-2 border border-amber-200 rounded-md focus:border-amber-500 focus:outline-none"
                 rows={3}
+                disabled={isUploading}
               />
             </div>
 
             <div>
-              <label className="block font-bold text-amber-900 mb-2">回忆日期</label>
+              <label className="text-sm font-medium text-amber-900">回忆日期</label>
               <Input
                 type="date"
                 value={memoryDate}
                 onChange={(e) => setMemoryDate(e.target.value)}
-                className="border-amber-200 focus:border-amber-400"
+                className="mt-1 border-amber-200 focus:border-amber-500"
+                disabled={isUploading}
               />
             </div>
           </div>
 
           {/* 操作按钮 */}
-          <div className="flex gap-4 justify-end">
+          <div className="flex gap-3 justify-end border-t border-amber-200 pt-4">
             <Button
               variant="outline"
               onClick={onClose}
-              className="border-amber-200 text-amber-900 hover:bg-amber-100"
+              disabled={isUploading}
+              className="border-amber-700 text-amber-900 hover:bg-amber-50"
             >
               取消
             </Button>
             <Button
               onClick={handleUpload}
               disabled={files.length === 0 || isUploading}
-              className="bg-amber-700 hover:bg-amber-800 text-white disabled:opacity-50"
+              className="bg-amber-700 hover:bg-amber-800 text-white"
             >
-              {isUploading ? "上传中..." : "上传回忆"}
+              {isUploading ? "上传中..." : "开始上传"}
             </Button>
           </div>
         </div>
