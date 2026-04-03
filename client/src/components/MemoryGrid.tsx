@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Memory } from "../../../drizzle/schema";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { X, Play } from "lucide-react";
+import { Play, ChevronLeft, ChevronRight, Home } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface MemoryGridProps {
   memories: Memory[];
@@ -10,6 +11,37 @@ interface MemoryGridProps {
 
 export default function MemoryGrid({ memories }: MemoryGridProps) {
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+
+  // 获取所有回忆的平面列表（用于导航）
+  const allMemoriesList = memories.sort(
+    (a, b) => new Date(b.memoryDate).getTime() - new Date(a.memoryDate).getTime()
+  );
+
+  const handleSelectMemory = (memory: Memory) => {
+    setSelectedMemory(memory);
+    const index = allMemoriesList.findIndex(m => m.id === memory.id);
+    setSelectedIndex(index);
+  };
+
+  const handlePrevious = () => {
+    if (selectedIndex > 0) {
+      const prevMemory = allMemoriesList[selectedIndex - 1];
+      handleSelectMemory(prevMemory);
+    }
+  };
+
+  const handleNext = () => {
+    if (selectedIndex < allMemoriesList.length - 1) {
+      const nextMemory = allMemoriesList[selectedIndex + 1];
+      handleSelectMemory(nextMemory);
+    }
+  };
+
+  const handleClose = () => {
+    setSelectedMemory(null);
+    setSelectedIndex(-1);
+  };
 
   // 按日期分组回忆
   const groupedMemories = memories.reduce(
@@ -54,7 +86,7 @@ export default function MemoryGrid({ memories }: MemoryGridProps) {
               {(dateMemories as Memory[]).map((memory: Memory) => (
                 <div
                   key={memory.id}
-                  onClick={() => setSelectedMemory(memory)}
+                  onClick={() => handleSelectMemory(memory)}
                   className="sketch-border group cursor-pointer overflow-hidden bg-white/70 backdrop-blur hover:shadow-lg transition-all duration-200"
                 >
                   {/* 图片/视频缩略图 */}
@@ -105,10 +137,50 @@ export default function MemoryGrid({ memories }: MemoryGridProps) {
       </div>
 
       {/* 详情模态框 */}
-      <Dialog open={!!selectedMemory} onOpenChange={() => setSelectedMemory(null)}>
+      <Dialog open={!!selectedMemory} onOpenChange={handleClose}>
         <DialogContent className="max-w-4xl bg-white/95 backdrop-blur border-2 border-amber-200">
           {selectedMemory && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="space-y-4">
+              {/* 导航栏 */}
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClose}
+                  className="text-amber-900 hover:bg-amber-100"
+                >
+                  <Home className="w-4 h-4 mr-2" />
+                  返回
+                </Button>
+                <div className="text-sm text-amber-700 font-medium">
+                  {selectedIndex + 1} / {allMemoriesList.length}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlePrevious}
+                    disabled={selectedIndex <= 0}
+                    className="text-amber-900 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    上一张
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleNext}
+                    disabled={selectedIndex >= allMemoriesList.length - 1}
+                    className="text-amber-900 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    下一张
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* 内容 */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* 媒体展示 */}
               <div className="md:col-span-2">
                 {selectedMemory.fileType === "image" ? (
@@ -171,8 +243,9 @@ export default function MemoryGrid({ memories }: MemoryGridProps) {
                       AI 已自动标注
                     </p>
                   </div>
-                )}
+                    )}
               </div>
+            </div>
             </div>
           )}
         </DialogContent>

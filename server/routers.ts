@@ -1,5 +1,5 @@
-import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
+import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -64,6 +64,7 @@ export const appRouter = router({
         title: z.string().optional(),
         description: z.string().optional(),
         albumId: z.number().optional(),
+        memoryDate: z.date().optional(),
       }))
       .mutation(async ({ input }) => {
         return updateMemory(input.id, input);
